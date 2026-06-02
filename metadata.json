@@ -1,0 +1,6 @@
+{
+  "name": "VIẾT PROMPT TỰ ĐỘNG",
+  "description": "An interactive web tool designed with an orange-and-white minimal aesthetic to generate precise descriptive prompts from reference images using Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
