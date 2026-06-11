@@ -44,7 +44,8 @@ async function startServer() {
       let instruction = "You are a professional sculptor and high-end 3D character artist concept designer. " +
         "Your task is to analyze the uploaded image(s) and synthesize a highly detailed, professional descriptive prompt " +
         "suitable for image generators (such as Midjourney, Imagen, or Stable Diffusion) and 3D modeling guidance. " +
-        "Explain the anatomy, pose, visual cues, and features accurately.";
+        "Explain the anatomy, pose, visual cues, and features accurately.\n\n" +
+        "STRICT HUMANOID HAND ANATOMY RULE: If the reference image features a humanoid, human-like, or bipedal character/anatomy, you MUST strictly enforce that both hands have exactly 5 fingers (five fingers per hand, including the thumb). In your generated prompt, explicitly state that each hand has exactly 5 clearly defined, fully formed, well-proportioned fingers (no more, no less) with no extra or merged digits to prevent AI hallucinations of extra fingers.";
 
       if (options) {
         const {
@@ -75,12 +76,15 @@ async function startServer() {
         }
         if (forcePose && forcePose !== "NONE") {
           const poseDesc = forcePose === "A_POSE"
-            ? "Enforce a strict anatomical character A-pose (arms rotated downwards symmetrically at 45 degrees, fingers spread natural and neutral, straight standing spine, symmetrical alignment) designed for flawless rigging."
-            : "Enforce a strict character T-pose (arms stretched fully horizontal and parallel to the ground, fingers extended neutrally, straight vertical posture, symmetrically balanced alignment) ideal for rigid character setup and game engines.";
+            ? "Enforce a strict anatomical character A-pose (arms rotated downwards symmetrically at 45 degrees, fingers spread natural and neutral with exactly 5 fingers per hand, straight standing spine, symmetrical alignment) designed for flawless rigging."
+            : "Enforce a strict character T-pose (arms stretched fully horizontal and parallel to the ground, fingers extended neutrally with exactly 5 fingers per hand, straight vertical posture, symmetrically balanced alignment) ideal for rigid character setup and game engines.";
           instruction += `\n- Forced Character Posture: ${poseDesc}`;
         }
         if (anatomy && anatomy.length > 0) {
           instruction += `\n- Key anatomical focus areas: Emphasize highly precise anatomy description for ${anatomy.join(", ")}. Describe proportions, musculature, flow lines, and structural landmarks.`;
+          if (anatomy.some((a: string) => a.toUpperCase().includes("HAND") || a.toUpperCase().includes("FINGER"))) {
+            instruction += " Pay extreme attention to the hands and fingers. Ensure each hand is described as having exactly 5 distinct, well-proportioned fingered digits (including the thumb), completely free of nesting, duplication, or webbing.";
+          }
         }
         if (removeAccessoriesClothing) {
           instruction += `\n- Sculpt / Accessory Removal Constraint: Strictly strip away and remove any superficial clothing, armor, drapery, or mechanized sci-fi accessory from the character. Reveal the raw anatomical model underneath as a pure ecorche or raw clay sculpt study focusing on body proportions and organic forms.`;
@@ -118,64 +122,65 @@ async function startServer() {
       // Add instructions part
       parts.push({ text: instruction });
 
-      // Generate precise structured output using Gemini 3.5 Flash, with automatic fallback to gemini-3.1-flash-lite in case of rate limits or service load
-      let response;
-      try {
-        console.log("Attempting prompt generation with gemini-3.5-flash...");
-        response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: { parts },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                prompt: {
-                  type: Type.STRING,
-                  description: "The complete descriptive prompt optimized for AI image generation, fully combining the specified styling selections, artistic materials, lighting, background, anatomy, and forms present in the reference images.",
-                },
-                analysis: {
-                  type: Type.STRING,
-                  description: "An elegant, descriptive analysis detailing the physical forms, anatomy, volumetric flow, and style detected in the reference images.",
-                },
-                tags: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "A list of relevant tags or keywords highlighting the style, 3D render properties, views, and materials.",
+      // Generate precise structured output using a robust fallback chain (gemini-3.5-flash -> gemini-flash-latest -> gemini-3.1-flash-lite) with built-in retry and backoff in case of rate limits or temporary 503 service load
+      let response = null;
+      let lastError = null;
+
+      const candidateModels = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+
+      for (const modelName of candidateModels) {
+        let attempts = 2; // Try up to 2 times for each model
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+          try {
+            console.log(`Attempting prompt generation with ${modelName} (Attempt ${attempt}/${attempts})...`);
+            response = await ai.models.generateContent({
+              model: modelName,
+              contents: { parts },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    prompt: {
+                      type: Type.STRING,
+                      description: "The complete descriptive prompt optimized for AI image generation, fully combining the specified styling selections, artistic materials, lighting, background, anatomy, and forms present in the reference images.",
+                    },
+                    analysis: {
+                      type: Type.STRING,
+                      description: "An elegant, descriptive analysis detailing the physical forms, anatomy, volumetric flow, and style detected in the reference images.",
+                    },
+                    tags: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description: "A list of relevant tags or keywords highlighting the style, 3D render properties, views, and materials.",
+                    }
+                  },
+                  required: ["prompt", "analysis", "tags"],
                 }
-              },
-              required: ["prompt", "analysis", "tags"],
+              }
+            });
+
+            if (response) {
+              console.log(`Successfully generated prompt using ${modelName}!`);
+              break;
+            }
+          } catch (modelErr: any) {
+            console.warn(`Model ${modelName} failed on attempt ${attempt}:`, modelErr.message || modelErr);
+            lastError = modelErr;
+            if (attempt < attempts) {
+              const waitTime = attempt * 600; // Exponentially backoff wait (e.g. 600ms, then retry)
+              console.log(`Waiting ${waitTime}ms before retrying ${modelName}...`);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
             }
           }
-        });
-      } catch (primaryErr: any) {
-        console.warn("Primary gemini-3.5-flash model offline or rate-limited. Falling back immediately to gemini-3.1-flash-lite as safe reserve...", primaryErr);
-        response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite",
-          contents: { parts },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                prompt: {
-                  type: Type.STRING,
-                  description: "The complete descriptive prompt optimized for AI image generation, fully combining the specified styling selections, artistic materials, lighting, background, anatomy, and forms present in the reference images.",
-                },
-                analysis: {
-                  type: Type.STRING,
-                  description: "An elegant, descriptive analysis detailing the physical forms, anatomy, volumetric flow, and style detected in the reference images.",
-                },
-                tags: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "A list of relevant tags or keywords highlighting the style, 3D render properties, views, and materials.",
-                }
-              },
-              required: ["prompt", "analysis", "tags"],
-            }
-          }
-        });
+        }
+        if (response) {
+          break;
+        }
+      }
+
+      if (!response) {
+        throw new Error(`All prompt generation models failed or are currently undergoing high demand. Last error: ${lastError?.message || lastError}`);
       }
 
       const responseText = response.text;

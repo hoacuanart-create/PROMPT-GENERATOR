@@ -66,8 +66,8 @@ export interface TranslationKeys {
 
 export const TRANSLATIONS: Record<"en" | "vi", TranslationKeys> = {
   en: {
-    appName: "AUTO PROMPT",
-    appSubName: "GENERATOR",
+    appName: "CHARACTER",
+    appSubName: "CREATION",
     activeLanguage: "English",
     geminiActive: "Gemini Active",
     resetWorkspace: "Reset Workspace",
@@ -131,8 +131,8 @@ export const TRANSLATIONS: Record<"en" | "vi", TranslationKeys> = {
     excludeAccessoriesText: "Exclude clothes & items for pure anatomical sculpting ecorche"
   },
   vi: {
-    appName: "VIẾT PROMPT",
-    appSubName: "TỰ ĐỘNG",
+    appName: "CÔNG CỤ TẠO",
+    appSubName: "NHÂN VẬT",
     activeLanguage: "Tiếng Việt",
     geminiActive: "Trợ lý Gemini hoạt động",
     resetWorkspace: "Đặt lại Thiết bị",
